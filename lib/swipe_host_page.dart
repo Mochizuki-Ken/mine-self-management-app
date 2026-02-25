@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mine/all_tasks_page.dart';
-import 'package:mine/today_tasks_page.dart';
+import 'pages/all_tasks_page.dart';
+import 'pages/today_tasks_page.dart';
 
-import 'home_page.dart';
-import 'detailed_schedule_page.dart';
-import 'simple_today_schedule_page.dart';
-import 'notes_page.dart';
+import 'pages/home_page.dart';
+import 'pages/detailed_schedule_page.dart';
+import 'pages/simple_today_schedule_page.dart';
+import 'pages/notes_page.dart';
 // import 'demo_empty_page.dart';
 import 'tools/app_lang.dart';
 

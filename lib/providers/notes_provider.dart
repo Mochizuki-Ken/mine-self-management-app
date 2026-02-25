@@ -10,6 +10,16 @@ class NotesController extends StateNotifier<List<Note>> {
   NotesController({required List<Note> seed}) : super(seed);
 
   void add(Note n) => state = [...state, n];
+
+  void update(Note updated) {
+    state = [
+      for (final n in state) if (n.id == updated.id) updated else n,
+    ];
+  }
+
+  void remove(String id) {
+    state = [for (final n in state) if (n.id != id) n];
+  }
 }
 
 List<Note> _seedNotes() {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/app_models.dart';
+import '../providers/notes_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/voice_assistant_provider.dart';
 import '../tools/app_lang.dart';
@@ -34,11 +36,26 @@ class NotesPage extends ConsumerWidget {
     }
   }
 
+  IconData _attachmentIcon(AttachmentType t) {
+    switch (t) {
+      case AttachmentType.image:
+        return Icons.image_outlined;
+      case AttachmentType.audio:
+        return Icons.mic_none_outlined;
+      case AttachmentType.file:
+        return Icons.insert_drive_file_outlined;
+      case AttachmentType.link:
+        return Icons.link;
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final t = ref.watch(appLangProvider);
     final voice = ref.watch(voiceAssistantProvider);
     final cs = Theme.of(context).colorScheme;
+
+    final notes = ref.watch(notesProvider);
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -62,15 +79,80 @@ class NotesPage extends ConsumerWidget {
         ),
         body: Stack(
           children: [
-            // Main content placeholder (replace with notes list later)
-            Center(
-              child: Text(
-                'Notes list will be added later.',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.55),
+            notes.isEmpty
+                ? Center(
+                    child: Text(
+                      'No notes yet',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.55),
+                          ),
                     ),
-              ),
-            ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 110),
+                    itemCount: notes.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) {
+                      final n = notes[i];
+
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => NoteEditPage(noteId: n.id),
+                            ),
+                          );
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                n.title.trim().isEmpty ? '(No title)' : n.title,
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white.withValues(alpha: 0.92),
+                                    ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                n.content,
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      color: Colors.white.withValues(alpha: 0.72),
+                                      height: 1.25,
+                                    ),
+                                maxLines: 4,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (n.attachments.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final a in n.attachments)
+                                      Chip(
+                                        avatar: Icon(_attachmentIcon(a.type), size: 18),
+                                        label: Text(a.name ?? a.uri),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
 
             // Small transcript/status overlay while listening
             if (voice.isListening || voice.error != null)
@@ -87,7 +169,7 @@ class NotesPage extends ConsumerWidget {
           ],
         ),
 
-        // Better-looking dual action buttons (bottom center)
+        // dual action buttons (bottom center)
         floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
         floatingActionButton: _BottomActionBar(
           isListening: voice.isListening,
@@ -110,6 +192,7 @@ class NotesPage extends ConsumerWidget {
   }
 }
 
+// --- existing UI widgets unchanged ---
 class _BottomActionBar extends StatelessWidget {
   const _BottomActionBar({
     required this.isListening,
@@ -245,7 +328,8 @@ class _TranscriptCard extends StatelessWidget {
         color: Colors.black.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: (isActive ? cs.primary : Colors.white).withValues(alpha: isActive ? 0.35 : 0.12),
+          color: (isActive ? cs.primary : Colors.white)
+              .withValues(alpha: isActive ? 0.35 : 0.12),
         ),
       ),
       child: Text(

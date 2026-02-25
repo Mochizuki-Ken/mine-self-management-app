@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../providers/schedule_store.dart';
+import '../../providers/schedule_store.dart';
 // import '../testData.dart';
-import 'models/app_models.dart';
-import 'schedule_event_dialog.dart';
+import '../models/app_models.dart';
+import '../schedule_event_dialog.dart';
 
 class DetailedSchedulePage extends ConsumerStatefulWidget {
   const DetailedSchedulePage({super.key});

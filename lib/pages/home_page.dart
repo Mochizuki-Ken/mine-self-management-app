@@ -5,12 +5,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'settings_page.dart';
-import 'providers/schedule_store.dart';
-import 'providers/settings_provider.dart';
-import 'providers/voice_assistant_provider.dart';
-import 'providers/task_store.dart';
-import 'models/app_models.dart';
-import 'tools/app_lang.dart';
+
+import '../models/app_models.dart';
+
+import '../providers/ai_chat_provider.dart';
+import '../providers/schedule_store.dart';
+import '../providers/settings_provider.dart';
+import '../providers/task_store.dart';
+import '../providers/voice_assistant_provider.dart';
+import '../tools/app_lang.dart';
+
+import '../widgets/ai_chat_view.dart';
+import '../widgets/ai_confirm_card.dart';
+import '../widgets/chat_composer_bar.dart';
 
 /// HomePage = Home Voice page UI (1 upcoming event).
 /// SwipeHostPage owns the PageViews and navigation.
@@ -37,17 +44,22 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse =
-      AnimationController(vsync: this, duration: const Duration(seconds: 2))
-        ..repeat(reverse: true);
+  late final AnimationController _pulse;
 
   Timer? _clockTimer;
   DateTime _now = DateTime.now();
   Offset? _pressPoint;
 
+  late final TextEditingController _chatCtrl = TextEditingController();
+
   @override
   void initState() {
     super.initState();
+
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
 
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -59,6 +71,7 @@ class _HomePageState extends ConsumerState<HomePage>
   void dispose() {
     _clockTimer?.cancel();
     _pulse.dispose();
+    _chatCtrl.dispose();
     super.dispose();
   }
 
@@ -115,11 +128,12 @@ class _HomePageState extends ConsumerState<HomePage>
     }
   }
 
-  // NEW: format a time range as HH:MM–HH:MM (same day) or HH:MM–MM/DD HH:MM if spanning days.
   String _formatRange(DateTime start, DateTime end) {
     String two(int n) => n.toString().padLeft(2, '0');
     String hm(DateTime d) => '${two(d.hour)}:${two(d.minute)}';
-    final sameDay = start.year == end.year && start.month == end.month && start.day == end.day;
+    final sameDay = start.year == end.year &&
+        start.month == end.month &&
+        start.day == end.day;
     if (sameDay) return '${hm(start)}–${hm(end)}';
     return '${hm(start)}–${two(end.month)}/${two(end.day)} ${hm(end)}';
   }
@@ -183,24 +197,100 @@ class _HomePageState extends ConsumerState<HomePage>
     await ref.read(voiceAssistantProvider.notifier).stopListening();
   }
 
+  Future<void> _toggleRecordingToInput() async {
+    final voice = ref.read(voiceAssistantProvider);
+    if (!voice.isListening) {
+      final settings = ref.read(settingsProvider);
+      final localeId = appLanguageLocaleId(settings.voiceLanguage);
+      await ref
+          .read(voiceAssistantProvider.notifier)
+          .startListening(localeId: localeId);
+      return;
+    }
+
+    await ref.read(voiceAssistantProvider.notifier).stopListening();
+    final v = ref.read(voiceAssistantProvider);
+    final text = (v.finalText.isNotEmpty ? v.finalText : v.partialText).trim();
+    if (text.isEmpty) return;
+
+    _chatCtrl.text = text;
+    _chatCtrl.selection = TextSelection.collapsed(offset: _chatCtrl.text.length);
+  }
+
+  /// Called by ChatComposerBar when user hits Send.
+  /// Stores the message. No confirmation popup here.
+  Future<void> _handleSendFromComposer(BuildContext context) async {
+    final text = _chatCtrl.text.trim();
+    if (text.isEmpty) return;
+
+    ref.read(aiChatProvider.notifier).addUserText(text);
+
+    _chatCtrl.clear();
+    setState(() {});
+
+    // Optional placeholder AI response (remove later)
+    ref.read(aiChatProvider.notifier).addAiText('Echo: $text');
+  }
+
+  /// FUTURE: call this ONLY when AI decides it needs confirmation.
+  Future<AiConfirmResult?> requestAiConfirmation(
+    BuildContext context, {
+    required String title,
+    required String prompt,
+    String inputHint = 'Optional input…',
+    String confirmText = 'Confirm',
+    String cancelText = 'Cancel',
+    bool destructive = false,
+  }) async {
+    final settings = ref.read(settingsProvider);
+
+    final confirmId = ref.read(aiChatProvider.notifier).addConfirmRequest(
+          title: title,
+          prompt: prompt,
+        );
+
+    final result = await showAiConfirmCard(
+      context,
+      title: title,
+      message: prompt,
+      inputHint: inputHint,
+      confirmText: confirmText,
+      cancelText: cancelText,
+      destructive: destructive,
+      confirmButtonColor: Color(settings.aiConfirmButtonColorValue),
+      cancelButtonColor: Color(settings.aiCancelButtonColorValue),
+    );
+
+    if (!mounted) return null;
+
+    if (result != null) {
+      ref.read(aiChatProvider.notifier).addConfirmResult(
+            confirmationId: confirmId,
+            confirmed: result.confirmed,
+            userInput: result.input,
+          );
+    }
+
+    return result;
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = ref.watch(appLangProvider);
     final cs = Theme.of(context).colorScheme;
     final voice = ref.watch(voiceAssistantProvider);
+    final settings = ref.watch(settingsProvider);
 
     final events = ref.watch(scheduleProvider);
     final tasks = ref.watch(tasksProvider);
     final now = DateTime.now();
 
-    // working/free state
     final isWorking = _isWorkingNow(now: now, events: events);
 
     final upcoming = events.where((e) => e.endAt.isAfter(now)).toList()
       ..sort((a, b) => a.startAt.compareTo(b.startAt));
     final nextEvent = upcoming.isEmpty ? null : upcoming.first;
 
-    // next task (short-term, not done)
     final upcomingTasks = tasks
         .where((t) => t.status != TaskStatus.done)
         .toList()
@@ -239,36 +329,65 @@ class _HomePageState extends ConsumerState<HomePage>
                 _TopStatusArea(
                   timeText: _timeStr,
                   dateText: _dateStr,
-
                   isWorking: isWorking,
-
                   nextEventTime: nextEventTime,
                   nextEventTitle: nextEventTitle,
                   nextEventCountdown: nextEventCountdown,
                   countdownColor: countdownColor,
-
                   nextFreeSlot: nextFreeSlot,
                   t: t,
-
                   onTapNextEvent: widget.onTapGoLeftBottom,
-
-                  // new: task preview
                   nextTaskTitle: nextTaskTitle,
                   nextTaskDue: nextTaskDue,
                   onTapNextTask: widget.onTapGoRightMiddle,
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
+
                 Expanded(
-                  child: Center(
-                    child: _MicCore(
-                      pulse: _pulse,
-                      isRecording: voice.isListening,
-                      t: t,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.transparent,
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.white.withValues(alpha: 0.02),
+                                  Colors.black.withValues(alpha: 0.10),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned.fill(
+                          child: Consumer(
+                            builder: (context, ref, _) {
+                              ref.watch(aiChatProvider);
+                              return const AiChatView();
+                            },
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 8),
-                _BottomHintArea(t: t),
+                const SizedBox(height: 10),
+
+                ChatComposerBar(
+                  controller: _chatCtrl,
+                  isRecording: voice.isListening,
+                  onTapMic: _toggleRecordingToInput,
+                  onSend: () => _handleSendFromComposer(context),
+
+                  // NEW: mic/send button colors from Settings
+                  sendButtonColor: Color(settings.chatActionButtonColorValue),
+                  micButtonColor: Color(settings.chatActionButtonColorValue),
+                  recordingButtonColor: Color(settings.chatActionButtonColorValue),
+                ),
               ],
             ),
           ),
@@ -315,6 +434,8 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 }
 
+// ---- Rest of file is unchanged from your existing home_page.dart ----
+
 class _TopStatusArea extends StatelessWidget {
   const _TopStatusArea({
     required this.timeText,
@@ -327,8 +448,6 @@ class _TopStatusArea extends StatelessWidget {
     required this.nextFreeSlot,
     required this.t,
     required this.onTapNextEvent,
-
-    // new:
     required this.nextTaskTitle,
     required this.nextTaskDue,
     required this.onTapNextTask,
@@ -350,7 +469,6 @@ class _TopStatusArea extends StatelessWidget {
 
   final VoidCallback onTapNextEvent;
 
-  // new:
   final String nextTaskTitle;
   final String nextTaskDue;
   final VoidCallback onTapNextTask;
@@ -376,8 +494,6 @@ class _TopStatusArea extends StatelessWidget {
                 ),
               ),
             ),
-
-            // CHANGED: shift pill to the left so it doesn't overlap Settings button
             Padding(
               padding: const EdgeInsets.only(right: 44),
               child: _StatePill(text: stateText, color: stateColor),
@@ -404,8 +520,6 @@ class _TopStatusArea extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10),
-
-        // new: next task preview
         InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: onTapNextTask,
@@ -444,7 +558,6 @@ class _TopStatusArea extends StatelessWidget {
             ),
           ),
         ),
-
         const SizedBox(height: 10),
         Text(
           '${t.home.nextFree} $nextFreeSlot',
@@ -553,136 +666,6 @@ class _NextEventRow extends StatelessWidget {
   }
 }
 
-class _MicCore extends StatelessWidget {
-  const _MicCore({
-    required this.pulse,
-    required this.isRecording,
-    required this.t,
-  });
-
-  final AnimationController pulse;
-  final bool isRecording;
-  final AppLang t;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-
-    final baseSize = MediaQuery.sizeOf(context).width * 0.44;
-    final size = baseSize.clamp(180.0, 260.0);
-
-    return AnimatedBuilder(
-      animation: pulse,
-      builder: (context, _) {
-        final glow = 0.25 + (pulse.value * 0.20);
-
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.94),
-                boxShadow: [
-                  BoxShadow(
-                    color: (isRecording ? Colors.redAccent : cs.primary)
-                        .withValues(alpha: glow),
-                    blurRadius: 28,
-                    spreadRadius: 2,
-                  ),
-                ],
-              ),
-              child: Center(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 160),
-                  child: isRecording
-                      ? const _SpeakingDots(key: ValueKey('dots'))
-                      : Icon(
-                          Icons.mic_none_rounded,
-                          key: const ValueKey('mic'),
-                          size: size * 0.42,
-                          color: Colors.black.withValues(alpha: 0.78),
-                        ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              isRecording ? t.home.listening : t.home.holdToSpeak,
-              style: tt.bodyMedium?.copyWith(
-                color: Colors.white.withValues(alpha: 0.55),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _SpeakingDots extends StatefulWidget {
-  const _SpeakingDots({required ValueKey<String> key});
-
-  @override
-  State<_SpeakingDots> createState() => _SpeakingDotsState();
-}
-
-class _SpeakingDotsState extends State<_SpeakingDots>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  )..repeat();
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, __) {
-        final t = _c.value;
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: List.generate(4, (i) {
-            final phase = (t * 2 * math.pi) + i * 0.8;
-            final dy = math.sin(phase) * 5.0;
-            final a = (0.55 + 0.45 * (0.5 + 0.5 * math.sin(phase)))
-                .clamp(0.0, 1.0);
-
-            return Padding(
-              padding: EdgeInsets.only(right: i == 3 ? 0 : 10),
-              child: Transform.translate(
-                offset: Offset(0, -dy),
-                child: Opacity(
-                  opacity: a,
-                  child: Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      // dots are white
-                      color: Colors.white.withValues(alpha: 0.92),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
-        );
-      },
-    );
-  }
-}
-
-// The rest (TranscriptCard, RippleDot, BottomHintArea) unchanged:
 class _TranscriptCard extends StatelessWidget {
   const _TranscriptCard({required this.text, required this.isActive});
 
@@ -764,47 +747,6 @@ class _RippleDotState extends State<_RippleDot>
           ),
         );
       },
-    );
-  }
-}
-
-class _BottomHintArea extends StatelessWidget {
-  const _BottomHintArea({required this.t});
-  final AppLang t;
-
-  @override
-  Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-
-    return Column(
-      children: [
-        Text(
-          t.home.longPressToSpeak,
-          style: tt.bodyMedium?.copyWith(
-            color: Colors.white.withValues(alpha: 0.55),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              t.home.scheduleLeft,
-              style: tt.labelLarge?.copyWith(
-                color: Colors.white.withValues(alpha: 0.5),
-              ),
-            ),
-            const SizedBox(width: 18),
-            Text(
-              t.home.tasksRight,
-              style: tt.labelLarge?.copyWith(
-                color: Colors.white.withValues(alpha: 0.5),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-      ],
     );
   }
 }
