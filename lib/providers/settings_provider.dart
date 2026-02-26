@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/legacy.dart';
+
+import '../storages/local_store.dart';
 
 enum AppLanguage {
   english,
@@ -32,13 +36,13 @@ class SettingsState {
   final AppLanguage displayLanguage;
   final AppLanguage voiceLanguage;
 
-  // NEW: one unified color for mic / send / recording (ARGB int)
+  // one unified color for mic / send / recording (ARGB int)
   final int chatActionButtonColorValue;
 
-  // Chat bubble colors
+  // self message bubble color
   final int chatUserBubbleColorValue;
 
-  // AI confirm card button colors (ARGB ints) - for future AI confirmation flows
+  // AI confirm card colors (future)
   final int aiConfirmButtonColorValue;
   final int aiCancelButtonColorValue;
 
@@ -51,16 +55,13 @@ class SettingsState {
     required this.aiCancelButtonColorValue,
   });
 
-  factory SettingsState.initial() => const SettingsState(
+  factory SettingsState.defaults() => const SettingsState(
         displayLanguage: AppLanguage.english,
         voiceLanguage: AppLanguage.english,
-
-        // Defaults
-        chatActionButtonColorValue: 0xFF2A8CFF, // blue
-        chatUserBubbleColorValue: 0xFF2A8CFF, // blue (self message bubble)
-
-        aiConfirmButtonColorValue: 0xFF2A8CFF, // blue
-        aiCancelButtonColorValue: 0xFF9E9E9E, // grey
+        chatActionButtonColorValue: 0xFF2A8CFF,
+        chatUserBubbleColorValue: 0xFF2A8CFF,
+        aiConfirmButtonColorValue: 0xFF2A8CFF,
+        aiCancelButtonColorValue: 0xFF9E9E9E,
       );
 
   SettingsState copyWith({
@@ -92,32 +93,45 @@ final settingsProvider =
 );
 
 class SettingsNotifier extends StateNotifier<SettingsState> {
-  SettingsNotifier() : super(SettingsState.initial());
+  SettingsNotifier() : super(SettingsState.defaults()) {
+    _init();
+  }
+
+  Future<void> _init() async {
+    // If no saved settings, keep defaults.
+    final loaded = await LocalStore.loadSettings();
+    if (loaded != null) state = loaded;
+  }
+
+  void _persist() => unawaited(LocalStore.saveSettings(state));
 
   void setDisplayLanguage(AppLanguage lang) {
     state = state.copyWith(displayLanguage: lang);
+    _persist();
   }
 
   void setVoiceLanguage(AppLanguage lang) {
     state = state.copyWith(voiceLanguage: lang);
+    _persist();
   }
 
-  // NEW: one unified color for mic/send/rec
   void setChatActionButtonColorValue(int argb) {
     state = state.copyWith(chatActionButtonColorValue: argb);
+    _persist();
   }
 
-  // Chat bubble colors
   void setChatUserBubbleColorValue(int argb) {
     state = state.copyWith(chatUserBubbleColorValue: argb);
+    _persist();
   }
 
-  // AI confirm card button colors
   void setAiConfirmButtonColorValue(int argb) {
     state = state.copyWith(aiConfirmButtonColorValue: argb);
+    _persist();
   }
 
   void setAiCancelButtonColorValue(int argb) {
     state = state.copyWith(aiCancelButtonColorValue: argb);
+    _persist();
   }
 }

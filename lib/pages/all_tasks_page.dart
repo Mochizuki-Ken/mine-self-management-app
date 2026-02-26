@@ -77,6 +77,92 @@ class AllTasksPage extends ConsumerWidget {
   int _doneSubCount(Task task) =>
       task.subTasks.where((st) => st.status == TaskStatus.done).length;
 
+  Future<void> _addShortTask(BuildContext context, WidgetRef ref) async {
+    final draft = await showDialog<TaskDraft>(
+      context: context,
+      builder: (_) => const TaskEditDialog(
+        dialogTitle: 'Add short-term task',
+        initialTitle: '',
+        initialDescription: '',
+        initialDue: null,
+      ),
+    );
+    if (draft == null) return;
+
+    final ok = await _confirm(
+      context,
+      title: 'Add task?',
+      message:
+          'Add "${draft.title.trim().isEmpty ? '(No title)' : draft.title.trim()}"?',
+      confirmText: 'Add',
+    );
+    if (!ok) return;
+
+    final now = DateTime.now();
+
+    ref.read(tasksProvider.notifier).add(
+          Task(
+            id: now.microsecondsSinceEpoch.toString(),
+            title: draft.title.trim().isEmpty ? '(No title)' : draft.title.trim(),
+            description:
+                draft.description.trim().isEmpty ? null : draft.description.trim(),
+            createdAt: now,
+            updatedAt: now,
+            scale: TaskScale.short,
+            due: draft.due ?? const TaskDue.none(),
+            status: TaskStatus.todo,
+            priority: TaskPriority.normal,
+          ),
+        );
+  }
+
+  Future<void> _addLongProject(BuildContext context, WidgetRef ref) async {
+    final draft = await showDialog<TaskDraft>(
+      context: context,
+      builder: (_) => const TaskEditDialog(
+        dialogTitle: 'Add long-term project',
+        initialTitle: '',
+        initialDescription: '',
+        initialDue: null,
+      ),
+    );
+    if (draft == null) return;
+
+    final ok = await _confirm(
+      context,
+      title: 'Add project?',
+      message:
+          'Add "${draft.title.trim().isEmpty ? '(No title)' : draft.title.trim()}"?',
+      confirmText: 'Add',
+    );
+    if (!ok) return;
+
+    final now = DateTime.now();
+
+    // If no due selected, default to next month.
+    final due = draft.due ??
+        TaskDue.month(
+          year: now.year,
+          month: now.month == 12 ? 1 : now.month + 1,
+        );
+
+    ref.read(tasksProvider.notifier).add(
+          Task(
+            id: now.microsecondsSinceEpoch.toString(),
+            title: draft.title.trim().isEmpty ? '(No title)' : draft.title.trim(),
+            description:
+                draft.description.trim().isEmpty ? null : draft.description.trim(),
+            createdAt: now,
+            updatedAt: now,
+            scale: TaskScale.long,
+            due: due,
+            status: TaskStatus.todo,
+            priority: TaskPriority.normal,
+            subTasks: const [],
+          ),
+        );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final all = ref.watch(tasksProvider);
@@ -91,50 +177,26 @@ class AllTasksPage extends ConsumerWidget {
         title: const Text('All Tasks'),
         backgroundColor: Colors.transparent,
         actions: [
-          IconButton(
+          PopupMenuButton<String>(
             tooltip: 'Add',
-            onPressed: () async {
-              final draft = await showDialog<TaskDraft>(
-                context: context,
-                builder: (_) => const TaskEditDialog(
-                  dialogTitle: 'Add task',
-                  initialTitle: '',
-                  initialDescription: '',
-                  initialDue: null,
-                ),
-              );
-              if (draft == null) return;
-
-              final ok = await _confirm(
-                context,
-                title: 'Add task?',
-                message:
-                    'Add "${draft.title.trim().isEmpty ? '(No title)' : draft.title.trim()}"?',
-                confirmText: 'Add',
-              );
-              if (!ok) return;
-
-              final now = DateTime.now();
-
-              ref.read(tasksProvider.notifier).add(
-                    Task(
-                      id: now.microsecondsSinceEpoch.toString(),
-                      title: draft.title.trim().isEmpty
-                          ? '(No title)'
-                          : draft.title.trim(),
-                      description: draft.description.trim().isEmpty
-                          ? null
-                          : draft.description.trim(),
-                      createdAt: now,
-                      updatedAt: now,
-                      scale: TaskScale.short,
-                      due: draft.due ?? const TaskDue.none(),
-                      status: TaskStatus.todo,
-                      priority: TaskPriority.normal,
-                    ),
-                  );
+            onSelected: (v) {
+              if (v == 'short') _addShortTask(context, ref);
+              if (v == 'long') _addLongProject(context, ref);
             },
-            icon: const Icon(Icons.add),
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'short',
+                child: Text('Add short-term task'),
+              ),
+              PopupMenuItem(
+                value: 'long',
+                child: Text('Add long-term project'),
+              ),
+            ],
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Icon(Icons.add),
+            ),
           ),
         ],
       ),
@@ -142,27 +204,33 @@ class AllTasksPage extends ConsumerWidget {
         padding: const EdgeInsets.all(16),
         children: [
           if (longTermTasks.isNotEmpty) ...[
-            Text('Long-Term Projects',
-                style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              'Long-Term Projects',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 10),
             ...List.generate(longTermTasks.length, (i) {
               final task = longTermTasks[i];
               return Padding(
                 padding: EdgeInsets.only(
-                    bottom: i == longTermTasks.length - 1 ? 16 : 10),
-                child: _buildLongTermTaskCard(context, ref, task),
+                  bottom: i == longTermTasks.length - 1 ? 16 : 10,
+                ),
+                child: _buildLongTermTaskCard(context, task),
               );
             }),
           ],
           if (shortTermTasks.isNotEmpty) ...[
-            Text('Short-Term Tasks',
-                style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              'Short-Term Tasks',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 10),
             ...List.generate(shortTermTasks.length, (i) {
               final task = shortTermTasks[i];
               return Padding(
                 padding: EdgeInsets.only(
-                    bottom: i == shortTermTasks.length - 1 ? 0 : 10),
+                  bottom: i == shortTermTasks.length - 1 ? 0 : 10,
+                ),
                 child: _buildTaskCard(context, task, ref),
               );
             }),
@@ -184,7 +252,7 @@ class AllTasksPage extends ConsumerWidget {
     );
   }
 
-  Widget _buildLongTermTaskCard(BuildContext context, WidgetRef ref, Task task) {
+  Widget _buildLongTermTaskCard(BuildContext context, Task task) {
     final tt = Theme.of(context).textTheme;
     final dueStr = _fmtDue(task.due);
     final totalSubs = task.subTasks.length;
@@ -204,7 +272,10 @@ class AllTasksPage extends ConsumerWidget {
         decoration: BoxDecoration(
           color: Colors.blueGrey.withOpacity(0.10),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.blueGrey.withOpacity(0.28), width: 1),
+          border: Border.all(
+            color: Colors.blueGrey.withOpacity(0.28),
+            width: 1,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -248,8 +319,6 @@ class AllTasksPage extends ConsumerWidget {
                 const Icon(Icons.chevron_right),
               ],
             ),
-
-            // NEW: progress bar for projects/long tasks
             if (totalSubs > 0) ...[
               const SizedBox(height: 10),
               ProjectProgressBar(
@@ -434,7 +503,10 @@ class _TaskCard extends StatelessWidget {
                 ],
               ),
             ),
-            IconButton(onPressed: onDelete, icon: const Icon(Icons.delete_outline)),
+            IconButton(
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline),
+            ),
           ],
         ),
       ),
@@ -479,8 +551,9 @@ class LongTermTaskDetailPage extends ConsumerWidget {
         content: Text(message),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             style: destructive
                 ? FilledButton.styleFrom(backgroundColor: Colors.redAccent)
@@ -573,8 +646,6 @@ class LongTermTaskDetailPage extends ConsumerWidget {
             const SizedBox(height: 12),
             Text('Due: $dueStr', style: tt.bodyMedium),
           ],
-
-          // NEW: project progress header
           if (totalSubs > 0) ...[
             const SizedBox(height: 14),
             Text(
@@ -590,9 +661,7 @@ class LongTermTaskDetailPage extends ConsumerWidget {
               trackColor: Colors.white.withOpacity(0.10),
             ),
           ],
-
           const SizedBox(height: 18),
-
           Row(
             children: [
               Expanded(
@@ -638,10 +707,11 @@ class LongTermTaskDetailPage extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 10),
-
           if (task.subTasks.isEmpty)
-            Text('No sub-tasks',
-                style: tt.bodySmall?.copyWith(color: Colors.white60))
+            Text(
+              'No sub-tasks',
+              style: tt.bodySmall?.copyWith(color: Colors.white60),
+            )
           else
             ...task.subTasks.map((st) {
               final done = st.status == TaskStatus.done;
@@ -651,7 +721,8 @@ class LongTermTaskDetailPage extends ConsumerWidget {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.08)),
                 ),
                 child: ListTile(
                   contentPadding:
@@ -719,7 +790,9 @@ class LongTermTaskDetailPage extends ConsumerWidget {
                         destructive: true,
                       );
                       if (!ok) return;
-                      ref.read(tasksProvider.notifier).removeSubTask(task.id, st.id);
+                      ref
+                          .read(tasksProvider.notifier)
+                          .removeSubTask(task.id, st.id);
                     },
                   ),
                 ),

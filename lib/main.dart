@@ -1,38 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+
 import 'swipe_host_page.dart';
 
-void main() {
-  runApp(const ProviderScope(child: VoiceLifeDemoApp()));
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Hive init (for local storage)
+  await Hive.initFlutter();
+
+  runApp(const ProviderScope(child: MineApp()));
 }
 
-class VoiceLifeDemoApp extends StatelessWidget {
-  const VoiceLifeDemoApp({super.key});
+class MineApp extends StatelessWidget {
+  const MineApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'VoiceLife Demo',
+      title: 'Mine',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF070A12),
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6A5CFF),
-          brightness: Brightness.dark,
-        ),
-      ),
-      home: const AppRouterShell(),
+      theme: ThemeData.dark(useMaterial3: true),
+      home: const SwipeHostPage(),
     );
-  }
-}
-
-class AppRouterShell extends StatelessWidget {
-  const AppRouterShell({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const SwipeHostPage();
   }
 }
