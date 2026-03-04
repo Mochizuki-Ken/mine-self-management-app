@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,15 +10,15 @@ import 'settings_page.dart';
 import '../models/app_models.dart';
 
 import '../providers/ai_chat_provider.dart';
-import '../providers/schedule_store.dart';
+import '../providers/events_provider.dart';
 import '../providers/settings_provider.dart';
-import '../providers/task_store.dart';
+import '../providers/tasks_provider.dart';
 import '../providers/voice_assistant_provider.dart';
 import '../tools/app_lang.dart';
 
+// Use the self-contained chat view that includes the composer
 import '../widgets/ai_chat_view.dart';
 import '../widgets/ai_confirm_card.dart';
-import '../widgets/chat_composer_bar.dart';
 
 /// HomePage = Home Voice page UI (1 upcoming event).
 /// SwipeHostPage owns the PageViews and navigation.
@@ -51,6 +52,8 @@ class _HomePageState extends ConsumerState<HomePage>
   Offset? _pressPoint;
 
   late final TextEditingController _chatCtrl = TextEditingController();
+
+  bool _isThinking = false;
 
   @override
   void initState() {
@@ -128,17 +131,7 @@ class _HomePageState extends ConsumerState<HomePage>
     }
   }
 
-  String _formatRange(DateTime start, DateTime end) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    String hm(DateTime d) => '${two(d.hour)}:${two(d.minute)}';
-    final sameDay = start.year == end.year &&
-        start.month == end.month &&
-        start.day == end.day;
-    if (sameDay) return '${hm(start)}–${hm(end)}';
-    return '${hm(start)}–${two(end.month)}/${two(end.day)} ${hm(end)}';
-  }
-
-  String _computeNextFreeSlotToday({
+  ({DateTime start, DateTime end}) _computeNextFreeSlotToday({
     required DateTime now,
     required List<Event> events,
   }) {
@@ -151,11 +144,11 @@ class _HomePageState extends ConsumerState<HomePage>
       ..sort((a, b) => a.startAt.compareTo(b.startAt));
 
     if (todayEvents.isEmpty) {
-      return _formatRange(now, todayEnd);
+      return (start: now, end: todayEnd);
     }
 
     if (now.isBefore(todayEvents.first.startAt)) {
-      return _formatRange(now, todayEvents.first.startAt);
+      return (start: now, end: todayEvents.first.startAt);
     }
 
     DateTime cursor = now;
@@ -168,11 +161,11 @@ class _HomePageState extends ConsumerState<HomePage>
           (i + 1 < todayEvents.length) ? todayEvents[i + 1].startAt : todayEnd;
 
       if (cursor.isBefore(nextStart)) {
-        return _formatRange(cursor, nextStart);
+        return (start: cursor, end: nextStart);
       }
     }
 
-    return _formatRange(now, todayEnd);
+    return (start: now, end: todayEnd);
   }
 
   bool _isWorkingNow({
@@ -180,6 +173,41 @@ class _HomePageState extends ConsumerState<HomePage>
     required List<Event> events,
   }) {
     return events.any((e) => e.startAt.isBefore(now) && e.endAt.isAfter(now));
+  }
+
+  // NEW: "closest" event = current ongoing (ending soonest) OR next upcoming (starting soonest)
+  bool _isOngoing(Event e) => !_now.isBefore(e.startAt) && _now.isBefore(e.endAt);
+
+  Event? _closestEvent(List<Event> events) {
+    final ongoing = events.where(_isOngoing).toList()
+      ..sort((a, b) => a.endAt.compareTo(b.endAt));
+    if (ongoing.isNotEmpty) return ongoing.first;
+
+    final upcoming = events.where((e) => _now.isBefore(e.startAt)).toList()
+      ..sort((a, b) => a.startAt.compareTo(b.startAt));
+    if (upcoming.isNotEmpty) return upcoming.first;
+
+    return null;
+  }
+
+  ({String text, Color color}) _eventCounter(Event e) {
+    // Upcoming => starts in ...
+    if (_now.isBefore(e.startAt)) {
+      final mins = e.startAt.difference(_now).inMinutes;
+      final txt = mins <= 0 ? 'Starts now' : 'Starts in ${mins}m';
+      return (text: txt, color: const Color(0xFF4DD0E1)); // light cyan
+    }
+
+    // Ongoing => ends in ...
+    if (_now.isBefore(e.endAt)) {
+      final mins = e.endAt.difference(_now).inMinutes;
+      final txt = mins <= 0 ? 'Ends now' : 'Ends in ${mins}m';
+      return (text: txt, color: const Color(0xFFFFB74D)); // light orange
+    }
+
+    // Ended
+    final minsAgo = _now.difference(e.endAt).inMinutes;
+    return (text: '${minsAgo}m ago', color: Colors.white.withValues(alpha: 0.45));
   }
 
   Future<void> _onLongPressStart(LongPressStartDetails d) async {
@@ -215,21 +243,6 @@ class _HomePageState extends ConsumerState<HomePage>
 
     _chatCtrl.text = text;
     _chatCtrl.selection = TextSelection.collapsed(offset: _chatCtrl.text.length);
-  }
-
-  /// Called by ChatComposerBar when user hits Send.
-  /// Stores the message. No confirmation popup here.
-  Future<void> _handleSendFromComposer(BuildContext context) async {
-    final text = _chatCtrl.text.trim();
-    if (text.isEmpty) return;
-
-    ref.read(aiChatProvider.notifier).addUserText(text);
-
-    _chatCtrl.clear();
-    setState(() {});
-
-    // Optional placeholder AI response (remove later)
-    ref.read(aiChatProvider.notifier).addAiText('Echo: $text');
   }
 
   /// FUTURE: call this ONLY when AI decides it needs confirmation.
@@ -281,37 +294,41 @@ class _HomePageState extends ConsumerState<HomePage>
     final voice = ref.watch(voiceAssistantProvider);
     final settings = ref.watch(settingsProvider);
 
-    final events = ref.watch(scheduleProvider);
+    final events = ref.watch(eventsProvider);
     final tasks = ref.watch(tasksProvider);
-    final now = DateTime.now();
+
+    final now = _now;
 
     final isWorking = _isWorkingNow(now: now, events: events);
 
-    final upcoming = events.where((e) => e.endAt.isAfter(now)).toList()
-      ..sort((a, b) => a.startAt.compareTo(b.startAt));
-    final nextEvent = upcoming.isEmpty ? null : upcoming.first;
+    final closest = _closestEvent(events);
 
-    final upcomingTasks = tasks
-        .where((t) => t.status != TaskStatus.done)
-        .toList()
-      ..sort((a, b) => _sortDue(a.due).compareTo(_sortDue(b.due)));
-    final nextTask = upcomingTasks.isEmpty ? null : upcomingTasks.first;
+    final nextEventTime = closest == null ? '--:--' : _hm(closest.startAt);
+    final nextEventTitle = closest == null ? t.home.none : closest.title;
 
-    final nextEventTime = nextEvent == null ? '--:--' : _hm(nextEvent.startAt);
-    final nextEventTitle = nextEvent == null ? t.home.none : nextEvent.title;
-    final nextEventCountdown = nextEvent == null
-        ? ''
-        : (nextEvent.startAt.isBefore(now)
-            ? t.home.now
-            : 'in ${_formatDurationShort(nextEvent.startAt.difference(now))}');
-    final countdownColor =
-        nextEvent == null ? const Color(0xFFFFC857) : Color(nextEvent.colorValue);
+    final nextEventCounter = closest == null
+        ? (text: '', color: const Color(0xFFFFC857))
+        : _eventCounter(closest);
+
+    final nextEventBorderColor = closest == null
+        ? Colors.white.withValues(alpha: 0.08)
+        : const Color(0xFF69F0AE).withValues(alpha: 0.55);
+    final nextEventBackgroundColor = closest == null
+        ? Colors.white.withValues(alpha: 0.06)
+        : const Color(0xFF69F0AE).withValues(alpha: 0.10);
 
     final nextFreeSlot = _computeNextFreeSlotToday(now: now, events: events);
+    final nextFreeStartText = _hm(nextFreeSlot.start);
+    final nextFreeDurationText =
+        _formatDurationShort(nextFreeSlot.end.difference(nextFreeSlot.start));
 
     final transcriptText = voice.isListening
         ? (voice.partialText.isEmpty ? t.home.listening : voice.partialText)
         : (voice.finalText.isEmpty ? '' : voice.finalText);
+
+    final upcomingTasks = tasks.where((t) => t.status != TaskStatus.done).toList()
+      ..sort((a, b) => _sortDue(a.due).compareTo(_sortDue(b.due)));
+    final nextTask = upcomingTasks.isEmpty ? null : upcomingTasks.first;
 
     final nextTaskTitle = nextTask == null ? t.home.none : nextTask.title;
     final nextTaskDue = (nextTask == null) ? '' : _fmtDue(nextTask.due);
@@ -332,9 +349,12 @@ class _HomePageState extends ConsumerState<HomePage>
                   isWorking: isWorking,
                   nextEventTime: nextEventTime,
                   nextEventTitle: nextEventTitle,
-                  nextEventCountdown: nextEventCountdown,
-                  countdownColor: countdownColor,
-                  nextFreeSlot: nextFreeSlot,
+                  nextEventCountdown: nextEventCounter.text,
+                  countdownColor: nextEventCounter.color,
+                  nextEventBorderColor: nextEventBorderColor,
+                  nextEventBackgroundColor: nextEventBackgroundColor,
+                  nextFreeStartText: nextFreeStartText,
+                  nextFreeDurationText: nextFreeDurationText,
                   t: t,
                   onTapNextEvent: widget.onTapGoLeftBottom,
                   nextTaskTitle: nextTaskTitle,
@@ -342,7 +362,6 @@ class _HomePageState extends ConsumerState<HomePage>
                   onTapNextTask: widget.onTapGoRightMiddle,
                 ),
                 const SizedBox(height: 14),
-
                 Expanded(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(16),
@@ -363,6 +382,7 @@ class _HomePageState extends ConsumerState<HomePage>
                             ),
                           ),
                         ),
+                        // Use the self-contained chat view (it includes the composer)
                         Positioned.fill(
                           child: Consumer(
                             builder: (context, ref, _) {
@@ -376,22 +396,10 @@ class _HomePageState extends ConsumerState<HomePage>
                   ),
                 ),
                 const SizedBox(height: 10),
-
-                ChatComposerBar(
-                  controller: _chatCtrl,
-                  isRecording: voice.isListening,
-                  onTapMic: _toggleRecordingToInput,
-                  onSend: () => _handleSendFromComposer(context),
-
-                  // NEW: mic/send button colors from Settings
-                  sendButtonColor: Color(settings.chatActionButtonColorValue),
-                  micButtonColor: Color(settings.chatActionButtonColorValue),
-                  recordingButtonColor: Color(settings.chatActionButtonColorValue),
-                ),
+                // Composer removed from HomePage — AiChatViewWithComposer provides it.
               ],
             ),
           ),
-
           Positioned(
             top: 6,
             right: 6,
@@ -405,7 +413,6 @@ class _HomePageState extends ConsumerState<HomePage>
               icon: const Icon(Icons.settings),
             ),
           ),
-
           if (voice.isListening) ...[
             Positioned.fill(
               child: Container(color: Colors.black.withValues(alpha: 0.18)),
@@ -417,7 +424,6 @@ class _HomePageState extends ConsumerState<HomePage>
                 child: _RippleDot(color: cs.primary),
               ),
           ],
-
           if (transcriptText.isNotEmpty || voice.isListening || voice.error != null)
             Positioned(
               left: 18,
@@ -434,7 +440,7 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 }
 
-// ---- Rest of file is unchanged from your existing home_page.dart ----
+// ---- Helper widgets (same functionality as your original file) ----
 
 class _TopStatusArea extends StatelessWidget {
   const _TopStatusArea({
@@ -445,7 +451,10 @@ class _TopStatusArea extends StatelessWidget {
     required this.nextEventTitle,
     required this.nextEventCountdown,
     required this.countdownColor,
-    required this.nextFreeSlot,
+    required this.nextEventBorderColor,
+    required this.nextEventBackgroundColor,
+    required this.nextFreeStartText,
+    required this.nextFreeDurationText,
     required this.t,
     required this.onTapNextEvent,
     required this.nextTaskTitle,
@@ -463,7 +472,12 @@ class _TopStatusArea extends StatelessWidget {
   final String nextEventCountdown;
   final Color countdownColor;
 
-  final String nextFreeSlot;
+  // NEW
+  final Color nextEventBorderColor;
+  final Color nextEventBackgroundColor;
+
+  final String nextFreeStartText;
+  final String nextFreeDurationText;
 
   final AppLang t;
 
@@ -496,7 +510,11 @@ class _TopStatusArea extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.only(right: 44),
-              child: _StatePill(text: stateText, color: stateColor),
+              child: _StatePill(
+                text: stateText,
+                color: stateColor,
+                subText: isWorking ? null : nextFreeDurationText,
+              ),
             ),
           ],
         ),
@@ -517,6 +535,8 @@ class _TopStatusArea extends StatelessWidget {
             countdown: nextEventCountdown,
             countdownColor: countdownColor,
             label: t.home.next,
+            borderColor: nextEventBorderColor,
+            backgroundColor: nextEventBackgroundColor,
           ),
         ),
         const SizedBox(height: 10),
@@ -536,7 +556,7 @@ class _TopStatusArea extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    '${t.home.next} $nextTaskTitle',
+                    '$nextTaskTitle',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: tt.titleMedium?.copyWith(
@@ -559,22 +579,48 @@ class _TopStatusArea extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10),
-        Text(
-          '${t.home.nextFree} $nextFreeSlot',
-          style: tt.bodyMedium?.copyWith(
-            color: Colors.white.withValues(alpha: 0.72),
+        if (isWorking) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF69F0AE).withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: const Color(0xFF69F0AE).withValues(alpha: 0.42),
+                width: 1.6,
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.schedule, size: 20, color: Color(0xFF69F0AE)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '${t.home.nextFree}  $nextFreeStartText · $nextFreeDurationText',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: tt.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white.withValues(alpha: 0.9),
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
 }
 
 class _StatePill extends StatelessWidget {
-  const _StatePill({required this.text, required this.color});
+  const _StatePill({required this.text, required this.color, this.subText});
 
   final String text;
   final Color color;
+  final String? subText;
 
   @override
   Widget build(BuildContext context) {
@@ -602,6 +648,16 @@ class _StatePill extends StatelessWidget {
               color: Colors.white.withValues(alpha: 0.92),
             ),
           ),
+          if (subText != null) ...[
+            const SizedBox(width: 8),
+            Text(
+              '· $subText',
+              style: tt.labelSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: Colors.white.withValues(alpha: 0.84),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -615,6 +671,8 @@ class _NextEventRow extends StatelessWidget {
     required this.countdown,
     required this.countdownColor,
     required this.label,
+    required this.borderColor,
+    required this.backgroundColor,
   });
 
   final String time;
@@ -623,6 +681,9 @@ class _NextEventRow extends StatelessWidget {
   final Color countdownColor;
   final String label;
 
+  final Color borderColor;
+  final Color backgroundColor;
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
@@ -630,9 +691,9 @@ class _NextEventRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: borderColor, width: 1.4),
       ),
       child: Row(
         children: [
@@ -643,7 +704,7 @@ class _NextEventRow extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              '$label $title',
+              title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: t.titleMedium?.copyWith(
@@ -653,11 +714,19 @@ class _NextEventRow extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           if (countdown.isNotEmpty)
-            Text(
-              countdown,
-              style: t.labelLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: countdownColor,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: countdownColor.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: countdownColor.withValues(alpha: 0.40)),
+              ),
+              child: Text(
+                countdown,
+                style: t.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: countdownColor,
+                ),
               ),
             ),
         ],

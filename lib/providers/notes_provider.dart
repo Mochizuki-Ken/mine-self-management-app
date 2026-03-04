@@ -15,7 +15,6 @@ class NotesController extends StateNotifier<List<Note>> {
   }
 
   Future<void> _init() async {
-    // No seed/test data anymore
     state = await LocalStore.loadNotes();
   }
 
@@ -35,6 +34,11 @@ class NotesController extends StateNotifier<List<Note>> {
 
   void remove(String id) {
     state = [for (final n in state) if (n.id != id) n];
+    _persist();
+  }
+  
+  void clearAll() {
+    state = const [];
     _persist();
   }
 }

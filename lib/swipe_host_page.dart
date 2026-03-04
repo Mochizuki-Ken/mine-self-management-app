@@ -92,6 +92,8 @@ class _SwipeHostPageState extends State<SwipeHostPage> {
                   children: const [
                     SimpleTodaySchedulePage(),
                     DetailedSchedulePage(),
+                    
+                    
                   ],
                 ),
                 HomePage(
@@ -108,7 +110,7 @@ class _SwipeHostPageState extends State<SwipeHostPage> {
                   children: const [
                     AllTasksPage(),
                     TodayTasksPage(),
-                    const NotesPage(),
+                    NotesPage(),
                   ],
                 ),
               ],

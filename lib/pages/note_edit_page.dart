@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/app_models.dart';
+import '../providers/events_provider.dart';
 import '../providers/notes_provider.dart';
+import '../providers/recurring_events_provider.dart';
+import '../providers/tasks_provider.dart';
+import '../services/link_sync_service.dart';
 import '../tools/app_lang.dart';
+import '../widgets/link_picker_sheet.dart';
 
-/// If [noteId] is null => create new note.
-/// If [noteId] is not null => edit existing note.
 class NoteEditPage extends ConsumerStatefulWidget {
   const NoteEditPage({
     super.key,
@@ -29,12 +32,15 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
   TextEditingController? _title;
   TextEditingController? _content;
 
-  // “All detail” fields
   NoteFormat _format = NoteFormat.markdown;
   bool _pinned = false;
   bool _archived = false;
   final List<String> _tags = [];
   final List<NoteAttachment> _attachments = [];
+
+  final Set<String> _linkedTaskIds = {};
+  final Set<String> _linkedEventIds = {};
+  final Set<String> _linkedRecurringTemplateIds = {};
 
   @override
   void dispose() {
@@ -65,6 +71,16 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
     _attachments
       ..clear()
       ..addAll(existing?.attachments ?? const []);
+
+    _linkedTaskIds
+      ..clear()
+      ..addAll(existing?.linkedTaskIds ?? const []);
+    _linkedEventIds
+      ..clear()
+      ..addAll(existing?.linkedEventIds ?? const []);
+    _linkedRecurringTemplateIds
+      ..clear()
+      ..addAll(existing?.linkedRecurringTemplateIds ?? const []);
   }
 
   Future<void> _editTags(BuildContext context) async {
@@ -165,7 +181,6 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
                 if (u.isEmpty) return;
 
                 final bytes = int.tryParse(size.text.trim());
-
                 final id = initial?.id ?? DateTime.now().microsecondsSinceEpoch.toString();
 
                 Navigator.pop(
@@ -210,6 +225,81 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
     }
   }
 
+  Future<void> _pickLinks() async {
+    final tasks = ref.read(tasksProvider);
+    final events = ref.read(eventsProvider);
+    final recurring = ref.read(recurringEventsProvider);
+
+    final res = await showModalBottomSheet<LinkPickerResult>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => LinkPickerSheet(
+        title: 'Link tasks, events & recurring series',
+        initialTaskIds: _linkedTaskIds,
+        initialNoteIds: const {},
+        initialEventIds: _linkedEventIds,
+        initialRecurringTemplateIds: _linkedRecurringTemplateIds,
+        tasks: tasks,
+        notes: const [],
+        events: events,
+        recurringTemplates: recurring,
+        showTasks: true,
+        showNotes: false,
+        showEvents: true,
+        showRecurring: true,
+      ),
+    );
+
+    if (res == null) return;
+    setState(() {
+      _linkedTaskIds
+        ..clear()
+        ..addAll(res.taskIds);
+      _linkedEventIds
+        ..clear()
+        ..addAll(res.eventIds);
+      _linkedRecurringTemplateIds
+        ..clear()
+        ..addAll(res.recurringTemplateIds);
+    });
+  }
+
+  void _save(Note? existing) {
+    final now = DateTime.now();
+
+    final title = _title!.text.trim();
+    final content = _content!.text;
+
+    final note = Note(
+      id: widget.noteId ?? now.microsecondsSinceEpoch.toString(),
+      title: title.isEmpty ? '(No title)' : title,
+      content: content,
+      format: _format,
+      tags: List.unmodifiable(_tags),
+      pinned: _pinned,
+      archived: _archived,
+      attachments: List.unmodifiable(_attachments),
+      linkedTaskIds: _linkedTaskIds.toList(),
+      linkedEventIds: _linkedEventIds.toList(),
+      linkedRecurringTemplateIds: _linkedRecurringTemplateIds.toList(),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      source: existing?.source ?? ItemSource.manual,
+    );
+
+    if (widget.noteId == null) {
+      ref.read(notesProvider.notifier).add(note);
+    } else {
+      if (existing == null) return;
+      ref.read(notesProvider.notifier).update(note);
+    }
+
+    ref.read(linkSyncServiceProvider).syncFromNote(note);
+
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.watch(appLangProvider);
@@ -223,6 +313,10 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
 
     final titleCtrl = _title!;
     final contentCtrl = _content!;
+    final tt = Theme.of(context).textTheme;
+
+    final linksSummary =
+        '${_linkedTaskIds.length} tasks • ${_linkedEventIds.length} events • ${_linkedRecurringTemplateIds.length} series';
 
     return Scaffold(
       appBar: AppBar(
@@ -231,47 +325,7 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
         actions: [
           IconButton(
             tooltip: 'Done',
-            onPressed: () {
-              final now = DateTime.now();
-
-              final title = titleCtrl.text.trim();
-              final content = contentCtrl.text;
-
-              if (widget.noteId == null) {
-                final note = Note(
-                  id: now.microsecondsSinceEpoch.toString(),
-                  title: title.isEmpty ? '(No title)' : title,
-                  content: content,
-                  format: _format,
-                  tags: List.unmodifiable(_tags),
-                  pinned: _pinned,
-                  archived: _archived,
-                  attachments: List.unmodifiable(_attachments),
-                  createdAt: now,
-                  updatedAt: now,
-                );
-                ref.read(notesProvider.notifier).add(note);
-              } else {
-                if (existing == null) {
-                  Navigator.of(context).pop();
-                  return;
-                }
-
-                final updated = existing.copyWith(
-                  title: title.isEmpty ? '(No title)' : title,
-                  content: content,
-                  format: _format,
-                  tags: List.unmodifiable(_tags),
-                  pinned: _pinned,
-                  archived: _archived,
-                  attachments: List.unmodifiable(_attachments),
-                  updatedAt: now,
-                );
-                ref.read(notesProvider.notifier).update(updated);
-              }
-
-              Navigator.of(context).pop();
-            },
+            onPressed: () => _save(existing),
             icon: const Icon(Icons.check),
           ),
         ],
@@ -302,7 +356,42 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
           ),
           const SizedBox(height: 12),
 
-          // Format
+          // Links
+          InkWell(
+            onTap: _pickLinks,
+            borderRadius: BorderRadius.circular(14),
+            child: Ink(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.link),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Links',
+                      style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                  Text(
+                    linksSummary,
+                    style: tt.bodySmall?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.65),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
           DropdownButtonFormField<NoteFormat>(
             value: _format,
             items: const [
@@ -320,7 +409,6 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
 
           const SizedBox(height: 12),
 
-          // Flags
           Container(
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.06),
@@ -346,13 +434,12 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
 
           const SizedBox(height: 12),
 
-          // Tags
           Row(
             children: [
               Expanded(
                 child: Text(
                   'Tags',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ),
               TextButton(
@@ -364,9 +451,9 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
           if (_tags.isEmpty)
             Text(
               'No tags',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.60),
-                  ),
+              style: tt.bodySmall?.copyWith(
+                color: Colors.white.withValues(alpha: 0.60),
+              ),
             )
           else
             Wrap(
@@ -377,13 +464,12 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
 
           const SizedBox(height: 18),
 
-          // Attachments
           Row(
             children: [
               Expanded(
                 child: Text(
                   'Attachments',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ),
               FilledButton.tonal(
@@ -400,9 +486,9 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
           if (_attachments.isEmpty)
             Text(
               'No attachments',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.60),
-                  ),
+              style: tt.bodySmall?.copyWith(
+                color: Colors.white.withValues(alpha: 0.60),
+              ),
             )
           else
             ...List.generate(_attachments.length, (i) {
@@ -446,21 +532,12 @@ class _NoteEditPageState extends ConsumerState<NoteEditPage> {
                 ),
               );
             }),
-
-          const SizedBox(height: 18),
-          Text(
-            'Tip: voice input creates a note draft; attachments are manual for now.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.6),
-                ),
-          ),
         ],
       ),
     );
   }
 }
 
-/// tiny helper without adding collection package
 extension _FirstOrNull<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
 }

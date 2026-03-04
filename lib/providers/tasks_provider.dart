@@ -1,14 +1,39 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/legacy.dart';
+
 import '../models/app_models.dart';
+import '../storages/local_store.dart';
 
-final tasksProvider = StateNotifierProvider<TasksController, List<Task>>((ref) {
-  return TasksController(seed: _seedTasks());
-});
+final tasksProvider = StateNotifierProvider<TasksNotifier, List<Task>>(
+  (ref) => TasksNotifier(),
+);
 
-class TasksController extends StateNotifier<List<Task>> {
-  TasksController({required List<Task> seed}) : super(seed);
+class TasksNotifier extends StateNotifier<List<Task>> {
+  TasksNotifier() : super(const []) {
+    _init();
+  }
 
-  void add(Task t) => state = [...state, t];
+  Future<void> _init() async {
+    state = await LocalStore.loadTasks();
+  }
+
+  void _persist() => unawaited(LocalStore.saveTasks(state));
+
+  void add(Task t) {
+    state = [t, ...state];
+    _persist();
+  }
+
+  void update(String id, Task updated) {
+    state = [for (final x in state) if (x.id == id) updated else x];
+    _persist();
+  }
+
+  void remove(String id) {
+    state = [for (final x in state) if (x.id != id) x];
+    _persist();
+  }
 
   void toggleDone(String id) {
     final now = DateTime.now();
@@ -20,66 +45,67 @@ class TasksController extends StateNotifier<List<Task>> {
             updatedAt: now,
           )
         else
-          x
+          x,
     ];
-  }
-
-  void remove(String id) {
-    state = [
-      for (final task in state)
-        if (task.id != id) task,
-    ];
-  }
-
-  void update(String id, Task updatedTask) {
-    state = [
-      for (final t in state)
-        if (t.id == id) updatedTask else t
-    ];
+    _persist();
   }
 
   // ----- Sub-task helpers for long-term/project tasks -----
 
-  void addSubTask(String parentId, Task subTask) {
-    final now = DateTime.now();
+  void addSubTask(String parentTaskId, Task subTask) {
     state = [
       for (final t in state)
-        if (t.id == parentId)
+        if (t.id == parentTaskId)
           t.copyWith(
             subTasks: [...t.subTasks, subTask],
-            updatedAt: now,
+            updatedAt: DateTime.now(),
           )
         else
           t
     ];
+    _persist();
   }
 
-  void updateSubTask(String parentId, String subId, Task updatedSubTask) {
-    final now = DateTime.now();
+  void updateSubTask(String parentTaskId, String subTaskId, Task updatedSubTask) {
     state = [
       for (final t in state)
-        if (t.id == parentId)
+        if (t.id == parentTaskId)
           t.copyWith(
             subTasks: [
               for (final st in t.subTasks)
-                if (st.id == subId) updatedSubTask else st
+                if (st.id == subTaskId) updatedSubTask else st
             ],
-            updatedAt: now,
+            updatedAt: DateTime.now(),
           )
         else
           t
     ];
+    _persist();
   }
 
-  void toggleSubTaskDone(String parentId, String subId) {
+  void removeSubTask(String parentTaskId, String subTaskId) {
+    state = [
+      for (final t in state)
+        if (t.id == parentTaskId)
+          t.copyWith(
+            subTasks: [for (final st in t.subTasks) if (st.id != subTaskId) st],
+            updatedAt: DateTime.now(),
+          )
+        else
+          t
+    ];
+    _persist();
+  }
+
+  void toggleSubTaskDone(String parentTaskId, String subTaskId) {
     final now = DateTime.now();
     state = [
       for (final t in state)
-        if (t.id == parentId)
+        if (t.id == parentTaskId)
           t.copyWith(
             subTasks: [
               for (final st in t.subTasks)
-                if (st.id == subId)
+                if (st.id == subTaskId)
                   st.copyWith(
                     status: st.status == TaskStatus.done ? TaskStatus.todo : TaskStatus.done,
                     updatedAt: now,
@@ -92,44 +118,11 @@ class TasksController extends StateNotifier<List<Task>> {
         else
           t
     ];
+    _persist();
   }
 
-  void removeSubTask(String parentId, String subId) {
-    final now = DateTime.now();
-    state = [
-      for (final t in state)
-        if (t.id == parentId)
-          t.copyWith(
-            subTasks: [for (final st in t.subTasks) if (st.id != subId) st],
-            updatedAt: now,
-          )
-        else
-          t
-    ];
+  void clearAll() {
+    state = const [];
+    _persist();
   }
-}
-
-List<Task> _seedTasks() {
-  final now = DateTime.now();
-  return [
-    Task(
-      id: 't1',
-      title: 'Buy milk',
-      scale: TaskScale.short,
-      due: TaskDue.on(DateTime(now.year, now.month, now.day)),
-      priority: TaskPriority.normal,
-      createdAt: now,
-      updatedAt: now,
-    ),
-    Task(
-      id: 't2',
-      title: 'Finish tax filing',
-      scale: TaskScale.long,
-      due: TaskDue.month(year: now.year, month: now.month + 1),
-      priority: TaskPriority.high,
-      createdAt: now,
-      updatedAt: now,
-      subTasks: const [],
-    ),
-  ];
 }

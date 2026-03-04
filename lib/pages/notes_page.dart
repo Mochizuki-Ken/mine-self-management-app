@@ -49,6 +49,30 @@ class NotesPage extends ConsumerWidget {
     }
   }
 
+  Future<bool> _confirmDelete(BuildContext context, String title) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete note?'),
+        content: Text('Delete "$title"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    return ok ?? false;
+  }
+
+  String _two(int n) => n.toString().padLeft(2, '0');
+  String _ymdHm(DateTime d) {
+    return '${d.year}-${_two(d.month)}-${_two(d.day)} ${_two(d.hour)}:${_two(d.minute)}';
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final t = ref.watch(appLangProvider);
@@ -94,6 +118,8 @@ class NotesPage extends ConsumerWidget {
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (context, i) {
                       final n = notes[i];
+                      final displayTitle = n.title.trim().isEmpty ? '(No title)' : n.title;
+                      final createdAt = n.createdAt;
 
                       return InkWell(
                         borderRadius: BorderRadius.circular(14),
@@ -114,14 +140,47 @@ class NotesPage extends ConsumerWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                n.title.trim().isEmpty ? '(No title)' : n.title,
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.w800,
-                                      color: Colors.white.withValues(alpha: 0.92),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          displayTitle,
+                                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                                fontWeight: FontWeight.w800,
+                                                color: Colors.white.withValues(alpha: 0.92),
+                                              ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        if (createdAt != null) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            _ymdHm(createdAt),
+                                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                                  color: Colors.white.withValues(alpha: 0.55),
+                                                  height: 1.1,
+                                                ),
+                                          ),
+                                        ],
+                                      ],
                                     ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    tooltip: 'Delete',
+                                    icon: const Icon(Icons.delete_outline),
+                                    color: Colors.redAccent.withValues(alpha: 0.95),
+                                    onPressed: () async {
+                                      final ok = await _confirmDelete(context, displayTitle);
+                                      if (!ok) return;
+                                      ref.read(notesProvider.notifier).remove(n.id);
+                                    },
+                                  ),
+                                ],
                               ),
                               const SizedBox(height: 6),
                               Text(

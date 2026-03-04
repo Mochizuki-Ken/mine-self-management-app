@@ -5,8 +5,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import '../models/app_models.dart';
 import '../storages/local_store.dart';
 
-final eventsProvider =
-    StateNotifierProvider<EventsController, List<Event>>((ref) {
+final eventsProvider = StateNotifierProvider<EventsController, List<Event>>((ref) {
   return EventsController();
 });
 
@@ -16,7 +15,6 @@ class EventsController extends StateNotifier<List<Event>> {
   }
 
   Future<void> _init() async {
-    // No seed/test data anymore
     final loaded = await LocalStore.loadEvents();
     state = [...loaded]..sort((a, b) => a.startAt.compareTo(b.startAt));
   }
@@ -28,16 +26,30 @@ class EventsController extends StateNotifier<List<Event>> {
     _persist();
   }
 
-  void update(Event e) {
+  void update(String id, Event updated) {
     state = [
-      for (final x in state) if (x.id == e.id) e else x,
+      for (final e in state) if (e.id == id) updated else e,
     ]..sort((a, b) => a.startAt.compareTo(b.startAt));
     _persist();
   }
 
   void remove(String id) {
-    state = state.where((x) => x.id != id).toList()
+    state = [for (final e in state) if (e.id != id) e]
       ..sort((a, b) => a.startAt.compareTo(b.startAt));
+    _persist();
+  }
+
+  void upsert(Event e) {
+    final exists = state.any((x) => x.id == e.id);
+    if (!exists) {
+      add(e);
+      return;
+    }
+    update(e.id, e);
+  }
+
+  void clearAll() {
+    state = const [];
     _persist();
   }
 }

@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/app_models.dart';
-import '../../providers/task_store.dart';
-import '../task_edit_dialog.dart';
+import '../../providers/tasks_provider.dart';
+import '../widgets/task_edit_dialog.dart';
 
 class TodayTasksPage extends ConsumerWidget {
   const TodayTasksPage({super.key});

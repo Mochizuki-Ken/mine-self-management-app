@@ -5,7 +5,7 @@ class OpenRouterAi {
   OpenRouterAi({
     required this.apiKey,
     this.appTitle = 'MineApp',
-    this.referer = 'http://localhost',
+    this.referer = 'http://192.168.0.123:8000',
     this.model = 'stepfun-ai/step-3.5-flash',
   });
 

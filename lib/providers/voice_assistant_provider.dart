@@ -1,4 +1,5 @@
-// import 'package:flutter_riverpod/flutter_riverpod.dart';
+// Voice assistant provider (legacy Riverpod) using speech_to_text.
+// This is the file you gave, slightly formatted and ready to use.
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 

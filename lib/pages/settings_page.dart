@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../providers/events_provider.dart';
+import '../providers/notes_provider.dart';
+import '../providers/recurring_event_exceptions_provider.dart';
+import '../providers/recurring_events_provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/tasks_provider.dart';
+import '../storages/local_store.dart';
 import '../tools/app_lang.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -61,6 +67,33 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
+  Future<bool> _confirm(
+    BuildContext context, {
+    required String title,
+    required String message,
+    required String confirmText,
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(confirmText),
+          ),
+        ],
+      ),
+    );
+    return ok ?? false;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final t = ref.watch(appLangProvider);
@@ -83,7 +116,6 @@ class SettingsPage extends ConsumerWidget {
       body: ListView(
         children: [
           _sectionTitle(context, 'Language'),
-
           ListTile(
             title: const Text('Display language'),
             subtitle: Text(appLanguageLabel(s.displayLanguage)),
@@ -120,7 +152,6 @@ class SettingsPage extends ConsumerWidget {
           ),
 
           _sectionTitle(context, 'Chat colors'),
-
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
@@ -131,7 +162,6 @@ class SettingsPage extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 10),
-
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Wrap(
@@ -147,9 +177,7 @@ class SettingsPage extends ConsumerWidget {
               }).toList(),
             ),
           ),
-
           const SizedBox(height: 18),
-
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
@@ -160,7 +188,6 @@ class SettingsPage extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 10),
-
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Wrap(
@@ -178,9 +205,7 @@ class SettingsPage extends ConsumerWidget {
           ),
 
           const SizedBox(height: 18),
-
           _sectionTitle(context, 'AI confirmation colors (future)'),
-
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
@@ -191,7 +216,6 @@ class SettingsPage extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 10),
-
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Wrap(
@@ -207,9 +231,7 @@ class SettingsPage extends ConsumerWidget {
               }).toList(),
             ),
           ),
-
           const SizedBox(height: 14),
-
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Wrap(
@@ -224,6 +246,103 @@ class SettingsPage extends ConsumerWidget {
                 );
               }).toList(),
             ),
+          ),
+
+          // -------------------- CLEAR STORAGE --------------------
+          _sectionTitle(context, 'Storage'),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+            title: const Text('Clear tasks'),
+            subtitle: const Text('Delete all tasks stored on this device'),
+            onTap: () async {
+              final ok = await _confirm(
+                context,
+                title: 'Clear all tasks?',
+                message: 'This cannot be undone.',
+                confirmText: 'Clear tasks',
+              );
+              if (!ok) return;
+
+              ref.read(tasksProvider.notifier).clearAll();
+              await LocalStore.clearTasks();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+            title: const Text('Clear notes'),
+            subtitle: const Text('Delete all notes stored on this device'),
+            onTap: () async {
+              final ok = await _confirm(
+                context,
+                title: 'Clear all notes?',
+                message: 'This cannot be undone.',
+                confirmText: 'Clear notes',
+              );
+              if (!ok) return;
+
+              ref.read(notesProvider.notifier).clearAll();
+              await LocalStore.clearNotes();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+            title: const Text('Clear events'),
+            subtitle: const Text('Delete all one-off events stored on this device'),
+            onTap: () async {
+              final ok = await _confirm(
+                context,
+                title: 'Clear all events?',
+                message: 'This cannot be undone.',
+                confirmText: 'Clear events',
+              );
+              if (!ok) return;
+
+              ref.read(eventsProvider.notifier).clearAll();
+              await LocalStore.clearEvents();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+            title: const Text('Clear recurring events'),
+            subtitle: const Text('Delete all recurring series + occurrences overrides'),
+            onTap: () async {
+              final ok = await _confirm(
+                context,
+                title: 'Clear recurring events?',
+                message: 'This will delete all recurring series and exceptions.',
+                confirmText: 'Clear recurring',
+              );
+              if (!ok) return;
+
+              ref.read(recurringEventsProvider.notifier).clearAll();
+              ref.read(recurringEventExceptionsProvider.notifier).clearAll();
+              await LocalStore.clearRecurringEvents();
+              await LocalStore.clearRecurringEventExceptions();
+            },
+          ),
+          const Divider(height: 24),
+          ListTile(
+            leading: const Icon(Icons.warning_amber, color: Colors.redAccent),
+            title: const Text('Clear ALL data'),
+            subtitle: const Text('Tasks, notes, events, recurring events, settings'),
+            onTap: () async {
+              final ok = await _confirm(
+                context,
+                title: 'Clear ALL data?',
+                message:
+                    'This will delete everything stored on this device. This cannot be undone.',
+                confirmText: 'Clear all',
+              );
+              if (!ok) return;
+
+              ref.read(tasksProvider.notifier).clearAll();
+              ref.read(notesProvider.notifier).clearAll();
+              ref.read(eventsProvider.notifier).clearAll();
+              ref.read(recurringEventsProvider.notifier).clearAll();
+              ref.read(recurringEventExceptionsProvider.notifier).clearAll();
+
+              await LocalStore.clearAll();
+            },
           ),
 
           const SizedBox(height: 24),

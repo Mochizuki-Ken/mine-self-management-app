@@ -18,6 +18,11 @@ class Event {
     this.busyStatus = BusyStatus.busy,
     this.location,
     this.description,
+
+    /// links to tasks/notes
+    this.linkedTaskIds = const [],
+    this.linkedNoteIds = const [],
+
     this.createdAt,
     this.updatedAt,
     this.source = ItemSource.manual,
@@ -27,15 +32,13 @@ class Event {
   final String title;
   final DateTime startAt;
   final DateTime endAt;
-
-  /// ARGB int (Color(value))
   final int colorValue;
-
-  /// If free => does not block time.
   final BusyStatus busyStatus;
-
   final String? location;
   final String? description;
+
+  final List<String> linkedTaskIds;
+  final List<String> linkedNoteIds;
 
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -50,6 +53,8 @@ class Event {
     BusyStatus? busyStatus,
     String? location,
     String? description,
+    List<String>? linkedTaskIds,
+    List<String>? linkedNoteIds,
     DateTime? createdAt,
     DateTime? updatedAt,
     ItemSource? source,
@@ -63,6 +68,8 @@ class Event {
       busyStatus: busyStatus ?? this.busyStatus,
       location: location ?? this.location,
       description: description ?? this.description,
+      linkedTaskIds: linkedTaskIds ?? this.linkedTaskIds,
+      linkedNoteIds: linkedNoteIds ?? this.linkedNoteIds,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       source: source ?? this.source,
@@ -82,10 +89,9 @@ class TaskDue {
   const TaskDue._(this.type, {this.at, this.on, this.year, this.month});
 
   final TaskDueType type;
-
-  final DateTime? at; // exact
-  final DateTime? on; // date-only
-  final int? year; // month-only
+  final DateTime? at;
+  final DateTime? on;
+  final int? year;
   final int? month;
 
   const TaskDue.none() : this._(TaskDueType.none);
@@ -108,6 +114,10 @@ class Task {
     this.subTasks = const [],
     this.linkedNoteIds = const [],
     this.linkedEventIds = const [],
+
+    /// NEW: recurring series links (template ids)
+    this.linkedRecurringTemplateIds = const [],
+
     this.estimatedMinutes,
     this.tags = const [],
     required this.createdAt,
@@ -124,12 +134,13 @@ class Task {
   final TaskScale scale;
   final TaskDue due;
 
-  /// Sub-tasks (for long-term/project tasks)
   final List<Task> subTasks;
 
-  /// Links to notes/events
   final List<String> linkedNoteIds;
   final List<String> linkedEventIds;
+
+  /// NEW
+  final List<String> linkedRecurringTemplateIds;
 
   final int? estimatedMinutes;
   final List<String> tags;
@@ -149,6 +160,10 @@ class Task {
     List<Task>? subTasks,
     List<String>? linkedNoteIds,
     List<String>? linkedEventIds,
+
+    /// NEW
+    List<String>? linkedRecurringTemplateIds,
+
     int? estimatedMinutes,
     List<String>? tags,
     DateTime? createdAt,
@@ -166,6 +181,8 @@ class Task {
       subTasks: subTasks ?? this.subTasks,
       linkedNoteIds: linkedNoteIds ?? this.linkedNoteIds,
       linkedEventIds: linkedEventIds ?? this.linkedEventIds,
+      linkedRecurringTemplateIds:
+          linkedRecurringTemplateIds ?? this.linkedRecurringTemplateIds,
       estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
       tags: tags ?? this.tags,
       createdAt: createdAt ?? this.createdAt,
@@ -195,17 +212,11 @@ class NoteAttachment {
 
   final String id;
   final AttachmentType type;
-
-  /// local path or remote URL
   final String uri;
-
   final String? name;
   final String? mimeType;
   final int? sizeBytes;
-
-  /// extra data (durationMs, width/height, etc.)
   final Map<String, dynamic> meta;
-
   final DateTime? createdAt;
 
   NoteAttachment copyWith({
@@ -242,6 +253,12 @@ class Note {
     this.pinned = false,
     this.archived = false,
     this.attachments = const [],
+    this.linkedTaskIds = const [],
+    this.linkedEventIds = const [],
+
+    /// NEW: recurring series links (template ids)
+    this.linkedRecurringTemplateIds = const [],
+
     this.createdAt,
     this.updatedAt,
     this.source = ItemSource.manual,
@@ -259,6 +276,12 @@ class Note {
 
   final List<NoteAttachment> attachments;
 
+  final List<String> linkedTaskIds;
+  final List<String> linkedEventIds;
+
+  /// NEW
+  final List<String> linkedRecurringTemplateIds;
+
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final ItemSource source;
@@ -272,6 +295,12 @@ class Note {
     bool? pinned,
     bool? archived,
     List<NoteAttachment>? attachments,
+    List<String>? linkedTaskIds,
+    List<String>? linkedEventIds,
+
+    /// NEW
+    List<String>? linkedRecurringTemplateIds,
+
     DateTime? createdAt,
     DateTime? updatedAt,
     ItemSource? source,
@@ -285,6 +314,10 @@ class Note {
       pinned: pinned ?? this.pinned,
       archived: archived ?? this.archived,
       attachments: attachments ?? this.attachments,
+      linkedTaskIds: linkedTaskIds ?? this.linkedTaskIds,
+      linkedEventIds: linkedEventIds ?? this.linkedEventIds,
+      linkedRecurringTemplateIds:
+          linkedRecurringTemplateIds ?? this.linkedRecurringTemplateIds,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       source: source ?? this.source,

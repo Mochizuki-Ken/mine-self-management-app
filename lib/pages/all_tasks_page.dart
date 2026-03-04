@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/app_models.dart';
-import '../../providers/task_store.dart';
+import '../../providers/tasks_provider.dart';
+import '../../services/link_sync_service.dart';
 import '../../widgets/project_progress_bar.dart';
-import '../task_edit_dialog.dart';
+import '../widgets/task_edit_dialog.dart';
 
 class AllTasksPage extends ConsumerWidget {
   const AllTasksPage({super.key});
@@ -100,20 +101,23 @@ class AllTasksPage extends ConsumerWidget {
 
     final now = DateTime.now();
 
-    ref.read(tasksProvider.notifier).add(
-          Task(
-            id: now.microsecondsSinceEpoch.toString(),
-            title: draft.title.trim().isEmpty ? '(No title)' : draft.title.trim(),
-            description:
-                draft.description.trim().isEmpty ? null : draft.description.trim(),
-            createdAt: now,
-            updatedAt: now,
-            scale: TaskScale.short,
-            due: draft.due ?? const TaskDue.none(),
-            status: TaskStatus.todo,
-            priority: TaskPriority.normal,
-          ),
-        );
+    final created = Task(
+      id: now.microsecondsSinceEpoch.toString(),
+      title: draft.title.trim().isEmpty ? '(No title)' : draft.title.trim(),
+      description: draft.description.trim().isEmpty ? null : draft.description.trim(),
+      createdAt: now,
+      updatedAt: now,
+      scale: TaskScale.short,
+      due: draft.due ?? const TaskDue.none(),
+      status: TaskStatus.todo,
+      priority: TaskPriority.normal,
+      linkedNoteIds: draft.linkedNoteIds,
+      linkedEventIds: draft.linkedEventIds,
+      linkedRecurringTemplateIds: draft.linkedRecurringTemplateIds,
+    );
+
+    ref.read(tasksProvider.notifier).add(created);
+    ref.read(linkSyncServiceProvider).syncFromTask(created);
   }
 
   Future<void> _addLongProject(BuildContext context, WidgetRef ref) async {
@@ -139,28 +143,30 @@ class AllTasksPage extends ConsumerWidget {
 
     final now = DateTime.now();
 
-    // If no due selected, default to next month.
     final due = draft.due ??
         TaskDue.month(
           year: now.year,
           month: now.month == 12 ? 1 : now.month + 1,
         );
 
-    ref.read(tasksProvider.notifier).add(
-          Task(
-            id: now.microsecondsSinceEpoch.toString(),
-            title: draft.title.trim().isEmpty ? '(No title)' : draft.title.trim(),
-            description:
-                draft.description.trim().isEmpty ? null : draft.description.trim(),
-            createdAt: now,
-            updatedAt: now,
-            scale: TaskScale.long,
-            due: due,
-            status: TaskStatus.todo,
-            priority: TaskPriority.normal,
-            subTasks: const [],
-          ),
-        );
+    final created = Task(
+      id: now.microsecondsSinceEpoch.toString(),
+      title: draft.title.trim().isEmpty ? '(No title)' : draft.title.trim(),
+      description: draft.description.trim().isEmpty ? null : draft.description.trim(),
+      createdAt: now,
+      updatedAt: now,
+      scale: TaskScale.long,
+      due: due,
+      status: TaskStatus.todo,
+      priority: TaskPriority.normal,
+      subTasks: const [],
+      linkedNoteIds: draft.linkedNoteIds,
+      linkedEventIds: draft.linkedEventIds,
+      linkedRecurringTemplateIds: draft.linkedRecurringTemplateIds,
+    );
+
+    ref.read(tasksProvider.notifier).add(created);
+    ref.read(linkSyncServiceProvider).syncFromTask(created);
   }
 
   @override
@@ -204,33 +210,23 @@ class AllTasksPage extends ConsumerWidget {
         padding: const EdgeInsets.all(16),
         children: [
           if (longTermTasks.isNotEmpty) ...[
-            Text(
-              'Long-Term Projects',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
+            Text('Long-Term Projects', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 10),
             ...List.generate(longTermTasks.length, (i) {
               final task = longTermTasks[i];
               return Padding(
-                padding: EdgeInsets.only(
-                  bottom: i == longTermTasks.length - 1 ? 16 : 10,
-                ),
+                padding: EdgeInsets.only(bottom: i == longTermTasks.length - 1 ? 16 : 10),
                 child: _buildLongTermTaskCard(context, task),
               );
             }),
           ],
           if (shortTermTasks.isNotEmpty) ...[
-            Text(
-              'Short-Term Tasks',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
+            Text('Short-Term Tasks', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 10),
             ...List.generate(shortTermTasks.length, (i) {
               final task = shortTermTasks[i];
               return Padding(
-                padding: EdgeInsets.only(
-                  bottom: i == shortTermTasks.length - 1 ? 0 : 10,
-                ),
+                padding: EdgeInsets.only(bottom: i == shortTermTasks.length - 1 ? 0 : 10),
                 child: _buildTaskCard(context, task, ref),
               );
             }),
@@ -272,10 +268,7 @@ class AllTasksPage extends ConsumerWidget {
         decoration: BoxDecoration(
           color: Colors.blueGrey.withOpacity(0.10),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: Colors.blueGrey.withOpacity(0.28),
-            width: 1,
-          ),
+          border: Border.all(color: Colors.blueGrey.withOpacity(0.28), width: 1),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -290,26 +283,18 @@ class AllTasksPage extends ConsumerWidget {
                     children: [
                       Text(
                         task.title,
-                        style:
-                            tt.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                        style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       Row(
                         children: [
                           if (dueStr.isNotEmpty)
-                            Text(
-                              dueStr,
-                              style:
-                                  tt.bodySmall?.copyWith(color: Colors.white70),
-                            ),
+                            Text(dueStr, style: tt.bodySmall?.copyWith(color: Colors.white70)),
                           if (totalSubs > 0) ...[
                             if (dueStr.isNotEmpty) const SizedBox(width: 12),
-                            Text(
-                              '$totalSubs sub-tasks',
-                              style:
-                                  tt.bodySmall?.copyWith(color: Colors.white70),
-                            ),
+                            Text('$totalSubs sub-tasks',
+                                style: tt.bodySmall?.copyWith(color: Colors.white70)),
                           ],
                         ],
                       ),
@@ -368,6 +353,9 @@ class AllTasksPage extends ConsumerWidget {
               initialTitle: task.title,
               initialDescription: task.description ?? '',
               initialDue: task.due,
+              initialLinkedNoteIds: task.linkedNoteIds,
+              initialLinkedEventIds: task.linkedEventIds,
+              initialLinkedRecurringTemplateIds: task.linkedRecurringTemplateIds,
             ),
           );
           if (draft == null) return;
@@ -380,19 +368,18 @@ class AllTasksPage extends ConsumerWidget {
           );
           if (!ok) return;
 
-          ref.read(tasksProvider.notifier).update(
-                task.id,
-                task.copyWith(
-                  title: draft.title.trim().isEmpty
-                      ? '(No title)'
-                      : draft.title.trim(),
-                  description: draft.description.trim().isEmpty
-                      ? null
-                      : draft.description.trim(),
-                  due: draft.due ?? const TaskDue.none(),
-                  updatedAt: DateTime.now(),
-                ),
-              );
+          final updated = task.copyWith(
+            title: draft.title.trim().isEmpty ? '(No title)' : draft.title.trim(),
+            description: draft.description.trim().isEmpty ? null : draft.description.trim(),
+            due: draft.due ?? const TaskDue.none(),
+            linkedNoteIds: draft.linkedNoteIds,
+            linkedEventIds: draft.linkedEventIds,
+            linkedRecurringTemplateIds: draft.linkedRecurringTemplateIds,
+            updatedAt: DateTime.now(),
+          );
+
+          ref.read(tasksProvider.notifier).update(task.id, updated);
+          ref.read(linkSyncServiceProvider).syncFromTask(updated);
         },
         onDelete: () async {
           final ok = await _confirm(
@@ -448,9 +435,7 @@ class _TaskCard extends StatelessWidget {
             IconButton(
               tooltip: isDone ? 'Mark as not done' : 'Mark as done',
               onPressed: onToggleDone,
-              icon: Icon(isDone
-                  ? Icons.check_box
-                  : Icons.check_box_outline_blank),
+              icon: Icon(isDone ? Icons.check_box : Icons.check_box_outline_blank),
             ),
             const SizedBox(width: 4),
             Expanded(
@@ -464,9 +449,7 @@ class _TaskCard extends StatelessWidget {
                           task.title,
                           style: tt.titleMedium?.copyWith(
                             fontWeight: FontWeight.w800,
-                            decoration: isDone
-                                ? TextDecoration.lineThrough
-                                : null,
+                            decoration: isDone ? TextDecoration.lineThrough : null,
                             color: isDone
                                 ? Colors.white.withOpacity(0.55)
                                 : Colors.white.withOpacity(0.92),
@@ -486,8 +469,7 @@ class _TaskCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       task.description!,
-                      style: tt.bodySmall?.copyWith(
-                          color: Colors.white.withOpacity(0.65)),
+                      style: tt.bodySmall?.copyWith(color: Colors.white.withOpacity(0.65)),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -496,8 +478,7 @@ class _TaskCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       'Due $dueStr',
-                      style: tt.bodySmall?.copyWith(
-                          color: Colors.white.withOpacity(0.65)),
+                      style: tt.bodySmall?.copyWith(color: Colors.white.withOpacity(0.65)),
                     ),
                   ],
                 ],
@@ -592,6 +573,9 @@ class LongTermTaskDetailPage extends ConsumerWidget {
                   initialTitle: task.title,
                   initialDescription: task.description ?? '',
                   initialDue: task.due,
+                  initialLinkedNoteIds: task.linkedNoteIds,
+                  initialLinkedEventIds: task.linkedEventIds,
+                  initialLinkedRecurringTemplateIds: task.linkedRecurringTemplateIds,
                 ),
               );
               if (draft == null) return;
@@ -604,19 +588,18 @@ class LongTermTaskDetailPage extends ConsumerWidget {
               );
               if (!ok) return;
 
-              ref.read(tasksProvider.notifier).update(
-                    task.id,
-                    task.copyWith(
-                      title: draft.title.trim().isEmpty
-                          ? '(No title)'
-                          : draft.title.trim(),
-                      description: draft.description.trim().isEmpty
-                          ? null
-                          : draft.description.trim(),
-                      due: draft.due ?? const TaskDue.none(),
-                      updatedAt: DateTime.now(),
-                    ),
-                  );
+              final updated = task.copyWith(
+                title: draft.title.trim().isEmpty ? '(No title)' : draft.title.trim(),
+                description: draft.description.trim().isEmpty ? null : draft.description.trim(),
+                due: draft.due ?? const TaskDue.none(),
+                linkedNoteIds: draft.linkedNoteIds,
+                linkedEventIds: draft.linkedEventIds,
+                linkedRecurringTemplateIds: draft.linkedRecurringTemplateIds,
+                updatedAt: DateTime.now(),
+              );
+
+              ref.read(tasksProvider.notifier).update(task.id, updated);
+              ref.read(linkSyncServiceProvider).syncFromTask(updated);
             },
           ),
           IconButton(
@@ -640,18 +623,14 @@ class LongTermTaskDetailPage extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if ((task.description ?? '').isNotEmpty)
-            Text(task.description!, style: tt.bodyLarge),
+          if ((task.description ?? '').isNotEmpty) Text(task.description!, style: tt.bodyLarge),
           if (dueStr.isNotEmpty) ...[
             const SizedBox(height: 12),
             Text('Due: $dueStr', style: tt.bodyMedium),
           ],
           if (totalSubs > 0) ...[
             const SizedBox(height: 14),
-            Text(
-              'Progress',
-              style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-            ),
+            Text('Progress', style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
             const SizedBox(height: 10),
             ProjectProgressBar(
               totalSubTasks: totalSubs,
@@ -665,10 +644,7 @@ class LongTermTaskDetailPage extends ConsumerWidget {
           Row(
             children: [
               Expanded(
-                child: Text(
-                  'Sub-tasks',
-                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-                ),
+                child: Text('Sub-tasks', style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
               ),
               FilledButton.tonal(
                 onPressed: () async {
@@ -686,18 +662,17 @@ class LongTermTaskDetailPage extends ConsumerWidget {
                   final now = DateTime.now();
                   final sub = Task(
                     id: now.microsecondsSinceEpoch.toString(),
-                    title: draft.title.trim().isEmpty
-                        ? '(No title)'
-                        : draft.title.trim(),
-                    description: draft.description.trim().isEmpty
-                        ? null
-                        : draft.description.trim(),
+                    title: draft.title.trim().isEmpty ? '(No title)' : draft.title.trim(),
+                    description: draft.description.trim().isEmpty ? null : draft.description.trim(),
                     status: TaskStatus.todo,
                     priority: TaskPriority.normal,
                     scale: TaskScale.short,
                     due: draft.due ?? const TaskDue.none(),
                     createdAt: now,
                     updatedAt: now,
+                    linkedNoteIds: draft.linkedNoteIds,
+                    linkedEventIds: draft.linkedEventIds,
+                    linkedRecurringTemplateIds: draft.linkedRecurringTemplateIds,
                   );
 
                   ref.read(tasksProvider.notifier).addSubTask(task.id, sub);
@@ -708,10 +683,7 @@ class LongTermTaskDetailPage extends ConsumerWidget {
           ),
           const SizedBox(height: 10),
           if (task.subTasks.isEmpty)
-            Text(
-              'No sub-tasks',
-              style: tt.bodySmall?.copyWith(color: Colors.white60),
-            )
+            Text('No sub-tasks', style: tt.bodySmall?.copyWith(color: Colors.white60))
           else
             ...task.subTasks.map((st) {
               final done = st.status == TaskStatus.done;
@@ -721,36 +693,24 @@ class LongTermTaskDetailPage extends ConsumerWidget {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(14),
-                  border:
-                      Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
                 ),
                 child: ListTile(
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                   leading: IconButton(
                     tooltip: done ? 'Mark as not done' : 'Mark as done',
-                    icon: Icon(done
-                        ? Icons.check_box
-                        : Icons.check_box_outline_blank),
+                    icon: Icon(done ? Icons.check_box : Icons.check_box_outline_blank),
                     onPressed: () {
-                      ref
-                          .read(tasksProvider.notifier)
-                          .toggleSubTaskDone(task.id, st.id);
+                      ref.read(tasksProvider.notifier).toggleSubTaskDone(task.id, st.id);
                     },
                   ),
                   title: Text(
                     st.title,
-                    style: TextStyle(
-                      decoration: done ? TextDecoration.lineThrough : null,
-                    ),
+                    style: TextStyle(decoration: done ? TextDecoration.lineThrough : null),
                   ),
                   subtitle: (st.description ?? '').trim().isEmpty
                       ? null
-                      : Text(
-                          st.description!,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                      : Text(st.description!, maxLines: 2, overflow: TextOverflow.ellipsis),
                   onTap: () async {
                     final draft = await showDialog<TaskDraft>(
                       context: context,
@@ -759,6 +719,9 @@ class LongTermTaskDetailPage extends ConsumerWidget {
                         initialTitle: st.title,
                         initialDescription: st.description ?? '',
                         initialDue: st.due,
+                        initialLinkedNoteIds: st.linkedNoteIds,
+                        initialLinkedEventIds: st.linkedEventIds,
+                        initialLinkedRecurringTemplateIds: st.linkedRecurringTemplateIds,
                       ),
                     );
                     if (draft == null) return;
@@ -767,13 +730,12 @@ class LongTermTaskDetailPage extends ConsumerWidget {
                           task.id,
                           st.id,
                           st.copyWith(
-                            title: draft.title.trim().isEmpty
-                                ? '(No title)'
-                                : draft.title.trim(),
-                            description: draft.description.trim().isEmpty
-                                ? null
-                                : draft.description.trim(),
+                            title: draft.title.trim().isEmpty ? '(No title)' : draft.title.trim(),
+                            description: draft.description.trim().isEmpty ? null : draft.description.trim(),
                             due: draft.due ?? const TaskDue.none(),
+                            linkedNoteIds: draft.linkedNoteIds,
+                            linkedEventIds: draft.linkedEventIds,
+                            linkedRecurringTemplateIds: draft.linkedRecurringTemplateIds,
                             updatedAt: DateTime.now(),
                           ),
                         );
@@ -790,9 +752,7 @@ class LongTermTaskDetailPage extends ConsumerWidget {
                         destructive: true,
                       );
                       if (!ok) return;
-                      ref
-                          .read(tasksProvider.notifier)
-                          .removeSubTask(task.id, st.id);
+                      ref.read(tasksProvider.notifier).removeSubTask(task.id, st.id);
                     },
                   ),
                 ),
