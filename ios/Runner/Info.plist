@@ -49,5 +49,13 @@
 	<string>We need microphone access for voice commands.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>We need speech recognition to convert your voice into text.</string>
+	<key>NSExceptionDomains</key>
+  <dict>
+    <key>192.168.0.123</key>
+    <dict>
+      <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
+      <key>NSIncludesSubdomains</key><true/>
+    </dict>
+  </dict>
 </dict>
 </plist>

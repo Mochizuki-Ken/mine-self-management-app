@@ -22,8 +22,11 @@ class _SwipeHostPageState extends State<SwipeHostPage> {
   final PageController _leftVController = PageController(initialPage: 0);
   final PageController _rightVController = PageController(initialPage: 1);
 
+  // ignore: unused_field
   int _hIndex = 1;
+  // ignore: unused_field
   int _leftVIndex = 0;
+  // ignore: unused_field
   int _rightVIndex = 1;
 
   Future<void> goToHorizontalPage(int index, {bool animate = true}) async {
@@ -76,7 +79,7 @@ class _SwipeHostPageState extends State<SwipeHostPage> {
   Widget build(BuildContext context) {
     return Consumer(
       builder: (context, ref, _) {
-        final t = ref.watch(appLangProvider);
+        ref.watch(appLangProvider);
 
         return Scaffold(
           body: SafeArea(

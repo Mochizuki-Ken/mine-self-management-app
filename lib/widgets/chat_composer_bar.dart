@@ -9,7 +9,7 @@ class ChatComposerBar extends StatefulWidget {
     required this.onSend,
     this.hintText = 'Message…',
 
-    // NEW:
+    // Colors
     this.sendButtonColor,
     this.micButtonColor,
     this.recordingButtonColor,
@@ -21,7 +21,6 @@ class ChatComposerBar extends StatefulWidget {
   final VoidCallback onSend;
   final String hintText;
 
-  // NEW:
   final Color? sendButtonColor;
   final Color? micButtonColor;
   final Color? recordingButtonColor;
@@ -59,20 +58,27 @@ class _ChatComposerBarState extends State<ChatComposerBar> {
     final cs = Theme.of(context).colorScheme;
     final hasText = widget.controller.text.trim().isNotEmpty;
 
-    // WhatsApp behavior: if text -> show send icon, else mic icon
-    final icon = hasText ? Icons.send : (widget.isRecording ? Icons.stop : Icons.mic);
+    // While recording: always show STOP (never Send), so user can stop recording even if text exists.
+    final bool showStop = widget.isRecording;
+    final bool showSend = !showStop && hasText;
 
-    final Color bg = () {
-      if (hasText) return widget.sendButtonColor ?? cs.primary;
-      if (widget.isRecording) return widget.recordingButtonColor ?? Colors.redAccent;
-      return widget.micButtonColor ?? cs.primary;
-    }();
+    final icon = showStop
+        ? Icons.stop
+        : (showSend ? Icons.send : Icons.mic);
 
-    final String tooltip = () {
-      if (hasText) return 'Send';
-      if (widget.isRecording) return 'Stop recording';
-      return 'Record voice';
-    }();
+    final Color bg = showStop
+        ? (widget.recordingButtonColor ?? Colors.redAccent)
+        : (showSend
+            ? (widget.sendButtonColor ?? cs.primary)
+            : (widget.micButtonColor ?? cs.primary));
+
+    final String tooltip = showStop
+        ? 'Stop recording'
+        : (showSend ? 'Send' : 'Record voice');
+
+    final VoidCallback onTap = showStop
+        ? widget.onTapMic
+        : (showSend ? widget.onSend : widget.onTapMic);
 
     return SafeArea(
       top: false,
@@ -95,7 +101,9 @@ class _ChatComposerBarState extends State<ChatComposerBar> {
                   maxLines: 5,
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) {
-                    if (widget.controller.text.trim().isNotEmpty) widget.onSend();
+                    if (widget.controller.text.trim().isNotEmpty && !widget.isRecording) {
+                      widget.onSend();
+                    }
                   },
                   decoration: InputDecoration(
                     isDense: true,
@@ -116,7 +124,7 @@ class _ChatComposerBarState extends State<ChatComposerBar> {
               tooltip: tooltip,
               background: bg,
               icon: icon,
-              onTap: hasText ? widget.onSend : widget.onTapMic,
+              onTap: onTap,
             ),
           ],
         ),
